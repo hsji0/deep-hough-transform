@@ -31,7 +31,7 @@ parser.add_argument('--tmp', default="", help='tmp')
 args = parser.parse_args()
 
 assert os.path.isfile(args.config)
-CONFIGS = yaml.load(open(args.config))
+CONFIGS = yaml.safe_load(open(args.config))
 
 # merge configs
 if args.tmp != "" and args.tmp != CONFIGS["MISC"]["TMP"]:
@@ -120,8 +120,7 @@ def test(test_loader, model, args):
 
             vis = visulize_mapping(b_points, size[::-1], names[0])
 
-            
-
+            print(f"> visualize_save_path :{visualize_save_path}")
             cv2.imwrite(join(visualize_save_path, names[0].split('/')[-1]), vis)
             np_data = np.array(b_points)
             np.save(join(visualize_save_path, names[0].split('/')[-1].split('.')[0]), np_data)
