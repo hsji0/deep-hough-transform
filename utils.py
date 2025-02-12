@@ -29,6 +29,7 @@ def convert_line_to_hough(line, size=(32, 32)):
         y1 = line.coord[0] - H/2
         x1 = line.coord[1] - W/2
         r = (y1 - k*x1) / np.sqrt(1 + k**2)
+
     return alpha, r
 
 def line2hough(line, numAngle, numRho, size=(32, 32)):
@@ -43,6 +44,90 @@ def line2hough(line, numAngle, numRho, size=(32, 32)):
     if alpha >= numAngle:
         alpha = numAngle - 1
     return alpha, r
+
+def convert_line_to_hough_ebr(line, size=(32, 32)):
+    """
+    Converts a line to its Hough representation (theta, r) using the coordinate system
+    where the origin is at the bottom-center of the image: (W/2, H).
+
+    The new coordinates are defined as:
+        x' = x - (W/2)
+        y' = H - y
+    so that the origin (0,0) is at bottom-center (center horizontally, bottom vertically).
+
+    The line's endpoints are assumed to be stored in line.coord as [x1, y1, x2, y2].
+    We compute the line angle (in the new coordinate system) and then define the normal
+    angle theta = (line_angle + pi/2) mod pi. The distance r is computed from the midpoint.
+
+    This function ensures r >= 0 and theta in [0, pi).
+    """
+    H, W = size
+    # Unpack endpoints (assumes line.coord = [x1, y1, x2, y2])
+    x1, y1, x2, y2 = [float(v) for v in line.coord]
+
+    # Transform coordinates to new system with origin at (W/2, H)
+    x1p = x1 - (W / 2)
+    y1p = H - y1
+    x2p = x2 - (W / 2)
+    y2p = H - y2
+
+    # Compute the angle of the line (in the new coordinate system) using arctan2
+    angle_line = np.arctan2(y2p - y1p, x2p - x1p)
+    # The normal's angle for the Hough transform:
+    theta = (angle_line + np.pi / 2) % np.pi  # ensures theta in [0, pi)
+
+    # Compute the midpoint of the line segment in the new coordinate system.
+    xm = (x1p + x2p) / 2.0
+    ym = (y1p + y2p) / 2.0
+
+    # Compute the distance from the origin to the line using the Hough formula.
+    r = xm * np.cos(theta) + ym * np.sin(theta)
+
+    # Enforce r >= 0: if negative, flip both r and theta.
+    if r < 0:
+        r = -r
+        theta = (theta + np.pi) % np.pi
+
+    return theta, r
+
+
+def line2hough_ebr(line, numAngle, numRho, size=(32, 32)):
+    """
+    Quantizes the continuous Hough parameters (theta, r) for a given line into discrete bins.
+
+    The theta is assumed to be in [0, pi) and r in [0, max_r], where max_r is the maximum
+    distance in the new coordinate system. In the new system:
+      - x' ranges in [-W/2, W/2]
+      - y' ranges in [0, H]
+    so the maximum distance from the origin iyjr eotf;fd
+    dns:
+      max_r = sqrt((W/2)^2 + (H)^2)show_interest(value
+
+    Returns:
+        theta_bin, r_bin : integer bin indices for theta and r.
+    """
+    H, W = size
+    # Maximum possible r in our new coordinate system (bottom-center as origin)
+    max_r = np.sqrt((W / 2) ** 2 + H ** 2)
+
+    # Convert line to continuous Hough parameters in the new coordinate system.
+    theta, r = convert_line_to_hough_ebr(line, size)
+
+    # Quantize theta: divide [0, pi) into numAngle bins.
+    itheta = np.pi / numAngle
+    theta_bin = int(np.round(theta / itheta))
+    if theta_bin >= numAngle:
+        theta_bin = numAngle - 1
+
+    # Quantize r: divide [0, max_r] into (numRho - 1) intervals.
+    irho = max_r / (numRho - 1)
+    r_bin = int(np.round(r / irho))
+    if r_bin >= numRho:
+        r_bin = numRho - 1
+
+    return theta_bin, r_bin
+
+
 
 def line2hough_float(line, numAngle, numRho, size=(32, 32)):
     H, W = size
@@ -82,8 +167,87 @@ def reverse_mapping(point_list, numAngle, numRho, size=(32, 32)):
                 b_points.append((p1[1], p1[0], p2[1], p2[0]))
     return b_points
 
+def reverse_mapping_ebr(hough_points, numAngle, numRho, size):
+    """
+    Reverse mapping: Convert Hough space coordinates back to line endpoints in the original image.
+
+    hough_points: a list of (theta_bin, r_bin) (or floating-point accumulator coordinates)
+                  in the Hough space.
+    numAngle: number of theta bins.
+    numRho: number of r bins.
+    size: (H, W) of the image.
+
+    This function first converts the bin indices to continuous theta and r using:
+      theta = theta_bin * (pi/numAngle)
+      r = r_bin * (max_r/(numRho-1))
+    where max_r = sqrt((W/2)^2 + H^2) (with origin at bottom-center).
+
+    It then computes the intersection of the corresponding line (in the new coordinate system)
+    with the image boundaries (in the new coordinates), and finally maps these intersection points
+    back to the original image coordinate system.
+
+    Returns a list of lines, each represented as (y1, x1, y2, x2) in the original coordinates.
+    """
+    H, W = size
+    max_r = np.sqrt((W / 2) ** 2 + H ** 2)
+    itheta = np.pi / numAngle
+    irho = max_r / (numRho - 1)
+
+    lines = []
+    for hp in hough_points:
+        # Here we assume hp = (theta_index, r_index) (or float values from regionprops).
+        theta = hp[0] * itheta
+        r = hp[1] * irho
+
+        # In our new coordinate system:
+        #   x' in [-W/2, W/2]
+        #   y' in [0, H]
+        # The line is given by: r = x'*cos(theta) + y'*sin(theta)
+        pts = []
+        # Intersection with left boundary (x' = -W/2)
+        x_val = -W / 2
+        if np.abs(np.cos(theta)) > 1e-6:
+            y_val = (r - x_val * np.cos(theta)) / np.sin(theta) if np.abs(np.sin(theta)) > 1e-6 else None
+            if y_val is not None and 0 <= y_val <= H:
+                pts.append((x_val, y_val))
+        # Intersection with right boundary (x' = W/2)
+        x_val = W / 2
+        if np.abs(np.cos(theta)) > 1e-6:
+            y_val = (r - x_val * np.cos(theta)) / np.sin(theta) if np.abs(np.sin(theta)) > 1e-6 else None
+            if y_val is not None and 0 <= y_val <= H:
+                pts.append((x_val, y_val))
+        # Intersection with bottom boundary (y' = 0)
+        y_val = 0
+        if np.abs(np.sin(theta)) > 1e-6:
+            x_val = (r - y_val * np.sin(theta)) / np.cos(theta) if np.abs(np.cos(theta)) > 1e-6 else None
+            if x_val is not None and -W / 2 <= x_val <= W / 2:
+                pts.append((x_val, y_val))
+        # Intersection with top boundary (y' = H)
+        y_val = H
+        if np.abs(np.sin(theta)) > 1e-6:
+            x_val = (r - y_val * np.sin(theta)) / np.cos(theta) if np.abs(np.cos(theta)) > 1e-6 else None
+            if x_val is not None and -W / 2 <= x_val <= W / 2:
+                pts.append((x_val, y_val))
+
+        # Remove duplicates (if any)
+        pts = list(set(pts))
+        if len(pts) >= 2:
+            # Pick two points (if more than two, you might refine this selection)
+            pt1, pt2 = pts[0], pts[1]
+            # Transform back to the original image coordinates:
+            # Original: x = x' + W/2, y = H - y'
+            pt1_orig = (pt1[0] + W / 2, H - pt1[1])
+            pt2_orig = (pt2[0] + W / 2, H - pt2[1])
+            # Format as (y1, x1, y2, x2)
+            lines.append((pt1_orig[1], pt1_orig[0], pt2_orig[1], pt2_orig[0]))
+    return lines
+
+
 def visulize_mapping(b_points, size, filename):
-    img = cv2.imread(os.path.join('./data/NKL', filename)) #change the path when using other dataset.
+    print(f"b_points :{b_points}")
+    print(f"size :{size}")
+    print(f"filename :{filename}")
+    img = cv2.imread(os.path.join('./data/training/ebr_test', filename)) #change the path when using other dataset.
     img = cv2.resize(img, size)
     for (y1, x1, y2, x2) in b_points:
         img = cv2.line(img, (x1, y1), (x2, y2), (255, 255, 0), thickness=int(0.01*max(size[0], size[1])))

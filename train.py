@@ -31,7 +31,7 @@ parser.add_argument('--tmp', default="", help='tmp')
 args = parser.parse_args()
 
 assert os.path.isfile(args.config)
-CONFIGS = yaml.load(open(args.config))
+CONFIGS = yaml.safe_load(open(args.config))
 
 # merge configs
 if args.tmp != "" and args.tmp != CONFIGS["MISC"]["TMP"]:
@@ -42,14 +42,12 @@ CONFIGS["OPTIMIZER"]["LR"] = float(CONFIGS["OPTIMIZER"]["LR"])
 
 os.makedirs(CONFIGS["MISC"]["TMP"], exist_ok=True)
 logger = Logger(os.path.join(CONFIGS["MISC"]["TMP"], "log.txt"))
-
-
-
 logger.info(CONFIGS)
 
-def main():
 
+def main():
     logger.info(args)
+    print("CONFIGS[DATA][DIR] : ", CONFIGS["DATA"]["DIR"])
     assert os.path.isdir(CONFIGS["DATA"]["DIR"])
 
     if CONFIGS['TRAIN']['SEED'] is not None:
@@ -58,7 +56,7 @@ def main():
         cudnn.deterministic = True
 
     model = Net(numAngle=CONFIGS["MODEL"]["NUMANGLE"], numRho=CONFIGS["MODEL"]["NUMRHO"], backbone=CONFIGS["MODEL"]["BACKBONE"])
-    
+
     if CONFIGS["TRAIN"]["DATA_PARALLEL"]:
         logger.info("Model Data Parallel")
         model = nn.DataParallel(model).cuda()
@@ -91,9 +89,9 @@ def main():
             logger.info("=> no checkpoint found at '{}'".format(args.resume))
 
     # dataloader
-    train_loader = get_loader(CONFIGS["DATA"]["DIR"], CONFIGS["DATA"]["LABEL_FILE"], 
+    train_loader = get_loader(CONFIGS["DATA"]["DIR"], CONFIGS["DATA"]["LABEL_FILE"],
                                 batch_size=CONFIGS["DATA"]["BATCH_SIZE"], num_thread=CONFIGS["DATA"]["WORKERS"], split='train')
-    val_loader = get_loader(CONFIGS["DATA"]["VAL_DIR"], CONFIGS["DATA"]["VAL_LABEL_FILE"], 
+    val_loader = get_loader(CONFIGS["DATA"]["VAL_DIR"], CONFIGS["DATA"]["VAL_LABEL_FILE"],
                                 batch_size=1, num_thread=CONFIGS["DATA"]["WORKERS"], split='val')
 
     logger.info("Data loading done.")
@@ -104,12 +102,18 @@ def main():
 
     start_epoch = 0
     best_acc = best_acc1
+
+    # --- Early Stopping Setup ---
+    # You can set EARLY_STOP_PATIENCE in your config file under CONFIGS["TRAIN"]
+    patience = CONFIGS["TRAIN"].get("EARLY_STOP_PATIENCE", 10)
+    early_stop_counter = 0
+
     is_best = False
     start_time = time.time()
 
     if CONFIGS["TRAIN"]["RESUME"] is not None:
         raise(NotImplementedError)
-    
+
     if CONFIGS["TRAIN"]["TEST"]:
         validate(val_loader, model, 0, writer, args)
         return
@@ -117,35 +121,44 @@ def main():
     logger.info("Start training.")
 
     for epoch in range(start_epoch, CONFIGS["TRAIN"]["EPOCHS"]):
-        
+
         train(train_loader, model, optimizer, epoch, writer, args)
         acc = validate(val_loader, model, epoch, writer, args)
-        #return
         scheduler.step()
 
+        # --- Early Stopping Logic ---
         if best_acc < acc:
             is_best = True
             best_acc = acc
-        else:
-            is_best = False
+            early_stop_counter = 0  # Reset counter when improvement occurs
 
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_acc1': best_acc,
-            'optimizer' : optimizer.state_dict()
+            # save best only
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_acc1': best_acc,
+                'optimizer': optimizer.state_dict()
             }, is_best, path=CONFIGS["MISC"]["TMP"])
 
-        t = time.time() - start_time       
+        else:
+            is_best = False
+            early_stop_counter += 1
+
+        t = time.time() - start_time
         elapsed = DayHourMinute(t)
         t /= (epoch + 1) - start_epoch    # seconds per epoch
         t = (CONFIGS["TRAIN"]["EPOCHS"] - epoch - 1) * t
         remaining = DayHourMinute(t)
-        
+
         logger.info("Epoch {0}/{1} finishied, auxiliaries saved to {2} .\t"
                     "Elapsed {elapsed.days:d} days {elapsed.hours:d} hours {elapsed.minutes:d} minutes.\t"
                     "Remaining {remaining.days:d} days {remaining.hours:d} hours {remaining.minutes:d} minutes.".format(
                     epoch, CONFIGS["TRAIN"]["EPOCHS"], CONFIGS["MISC"]["TMP"], elapsed=elapsed, remaining=remaining))
+
+        # Check if early stopping condition is met
+        if early_stop_counter >= patience:
+            logger.info("Early stopping triggered. No improvement for {} epochs.".format(patience))
+            break
 
     logger.info("Optimization done, ALL results saved to %s." % CONFIGS["MISC"]["TMP"])
 
@@ -218,6 +231,7 @@ def validate(val_loader, model, epoch, writer, args):
 
     with torch.no_grad():
         bar = tqdm.tqdm(val_loader)
+        print(bar)
         iter_num = len(val_loader.dataset) // 1
         for i, data in enumerate(bar):
 

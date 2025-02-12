@@ -1,6 +1,8 @@
 import os
 import numpy as np
 import cv2
+import glob
+
 
 START_X = 2950
 CROP_SIZE = (2400, 640)
@@ -104,6 +106,58 @@ def analyze_result_npy(npy_fullpath):
     print(npy_file)
 
 
+def fix_y2_value(line):
+    """
+    Given a line in the format:
+      x1, y1, x2, y2, image_width, image_height
+
+    We overwrite the 4th entry (y2) with '640' unconditionally.
+    If the line doesn't have exactly 6 comma-separated parts, return None.
+    """
+    parts = [p.strip() for p in line.split(',')]
+
+    # We expect exactly 6 parts: indices [0..5]
+    if len(parts) != 6:
+        return None
+
+    # parts[3] corresponds to y2 in the original format
+    parts[3] = "640"
+
+    # Rejoin with comma (and optional space)
+    return ", ".join(parts)
+
+
+def fix_y2_in_folder(folder_path):
+    """
+    Processes all .txt files in the given folder, sets y2 to '640' in every line,
+    and overwrites the original files.
+    """
+    txt_files = glob.glob(os.path.join(folder_path, "*.txt"))
+
+    for txt_file in txt_files:
+        # Read all lines
+        with open(txt_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Process each line
+        new_lines = []
+        for line in lines:
+            new_line = fix_y2_value(line)
+            # If valid, add it to the new lines; otherwise, skip or handle differently
+            if new_line is not None:
+                new_lines.append(new_line + "\n")
+
+        # Overwrite the file
+        with open(txt_file, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
+        print(f"Processed: {txt_file}")
+
+
+# Example usage
+if __name__ == "__main__":
+    folder = r"D:\4. ADC\5.pyeongtaek WIND2 ADC\1.EBR length\Nanya_EBR\1\CROPPED\train"
+    fix_y2_in_folder(folder)
 # if __name__ == "__main__":
 #     result_npy = r"C:\Users\hsji\Downloads\4001.npy"
 #     analyze_result_npy(result_npy)
@@ -112,14 +166,14 @@ def analyze_result_npy(npy_fullpath):
 #     convert_file_type(r"D:\4. ADC\5.pyeongtaek WIND2 ADC\0. E0 ADC\Nanya_EBR\1\CROPPED")
 
 
-if __name__ == '__main__':
-    image_path = r"D:\4. ADC\5.pyeongtaek WIND2 ADC\0. E0 ADC\Nanya_EBR\1\6560x50000_9.bmp"
-    save_directory = r"D:\4. ADC\5.pyeongtaek WIND2 ADC\0. E0 ADC\Nanya_EBR\1\CROPPED"
-
-    crop_max_num = 50000 // 640
-    saved_files = crop_ebr_img(image_path, save_directory, crop_num=crop_max_num)
-
-    print("Saved cropped images:")
-    for file in saved_files:
-        print(file)
+# if __name__ == '__main__':
+#     image_path = r"D:\4. ADC\5.pyeongtaek WIND2 ADC\0. E0 ADC\Nanya_EBR\1\6560x50000_9.bmp"
+#     save_directory = r"D:\4. ADC\5.pyeongtaek WIND2 ADC\0. E0 ADC\Nanya_EBR\1\CROPPED"
+#
+#     crop_max_num = 50000 // 640
+#     saved_files = crop_ebr_img(image_path, save_directory, crop_num=crop_max_num)
+#
+#     print("Saved cropped images:")
+#     for file in saved_files:
+#         print(file)
 

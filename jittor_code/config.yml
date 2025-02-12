@@ -13,6 +13,7 @@ DATA:
     # TEST_LABEL_FILE: "data/training/test_1716_100_100.txt"
     BATCH_SIZE: 8
     WORKERS: 4
+    EARLY_STOP_PATIENCE: 15
 
 OPTIMIZER:
     LR: 2e-4
