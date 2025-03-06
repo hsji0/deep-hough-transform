@@ -3,7 +3,7 @@ import numpy as np
 import math
 import cv2 
 import os
-import torchvision
+#import torchvision
 from PIL import Image
 from basic_ops import *
 
@@ -29,11 +29,11 @@ def convert_line_to_hough(line, size=(32, 32)):
         y1 = line.coord[0] - H/2
         x1 = line.coord[1] - W/2
         r = (y1 - k*x1) / np.sqrt(1 + k**2)
-
     return alpha, r
 
-def line2hough(line, numAngle, numRho, size=(32, 32)):
+def line2hough(line, numAngle, numRho, size=(320, 320)):
     H, W = size
+    print(f"line info : {line.coord} {line.length} {line.angle}")
     alpha, r = convert_line_to_hough(line, size)
 
     irho = int(np.sqrt(H*H + W*W) + 1) / ((numRho - 1))
@@ -63,7 +63,7 @@ def convert_line_to_hough_ebr(line, size=(32, 32)):
     """
     H, W = size
     # Unpack endpoints (assumes line.coord = [x1, y1, x2, y2])
-    x1, y1, x2, y2 = [float(v) for v in line.coord]
+    y1, x1, y2, x2 = [float(v) for v in line.coord]
 
     # Transform coordinates to new system with origin at (W/2, H)
     x1p = x1 - (W / 2)
@@ -143,7 +143,6 @@ def line2hough_float(line, numAngle, numRho, size=(32, 32)):
     return alpha, r
 
 def reverse_mapping(point_list, numAngle, numRho, size=(32, 32)):
-    #return type: [(y1, x1, y2, x2)]
     H, W = size
     irho = int(np.sqrt(H*H + W*W) + 1) / ((numRho - 1))
     itheta = np.pi / numAngle
@@ -167,86 +166,59 @@ def reverse_mapping(point_list, numAngle, numRho, size=(32, 32)):
                 b_points.append((p1[1], p1[0], p2[1], p2[0]))
     return b_points
 
-def reverse_mapping_ebr(hough_points, numAngle, numRho, size):
-    """
-    Reverse mapping: Convert Hough space coordinates back to line endpoints in the original image.
-
-    hough_points: a list of (theta_bin, r_bin) (or floating-point accumulator coordinates)
-                  in the Hough space.
-    numAngle: number of theta bins.
-    numRho: number of r bins.
-    size: (H, W) of the image.
-
-    This function first converts the bin indices to continuous theta and r using:
-      theta = theta_bin * (pi/numAngle)
-      r = r_bin * (max_r/(numRho-1))
-    where max_r = sqrt((W/2)^2 + H^2) (with origin at bottom-center).
-
-    It then computes the intersection of the corresponding line (in the new coordinate system)
-    with the image boundaries (in the new coordinates), and finally maps these intersection points
-    back to the original image coordinate system.
-
-    Returns a list of lines, each represented as (y1, x1, y2, x2) in the original coordinates.
-    """
-    H, W = size
-    max_r = np.sqrt((W / 2) ** 2 + H ** 2)
-    itheta = np.pi / numAngle
-    irho = max_r / (numRho - 1)
-
-    lines = []
-    for hp in hough_points:
-        # Here we assume hp = (theta_index, r_index) (or float values from regionprops).
-        theta = hp[0] * itheta
-        r = hp[1] * irho
-
-        # In our new coordinate system:
-        #   x' in [-W/2, W/2]
-        #   y' in [0, H]
-        # The line is given by: r = x'*cos(theta) + y'*sin(theta)
-        pts = []
-        # Intersection with left boundary (x' = -W/2)
-        x_val = -W / 2
-        if np.abs(np.cos(theta)) > 1e-6:
-            y_val = (r - x_val * np.cos(theta)) / np.sin(theta) if np.abs(np.sin(theta)) > 1e-6 else None
-            if y_val is not None and 0 <= y_val <= H:
-                pts.append((x_val, y_val))
-        # Intersection with right boundary (x' = W/2)
-        x_val = W / 2
-        if np.abs(np.cos(theta)) > 1e-6:
-            y_val = (r - x_val * np.cos(theta)) / np.sin(theta) if np.abs(np.sin(theta)) > 1e-6 else None
-            if y_val is not None and 0 <= y_val <= H:
-                pts.append((x_val, y_val))
-        # Intersection with bottom boundary (y' = 0)
-        y_val = 0
-        if np.abs(np.sin(theta)) > 1e-6:
-            x_val = (r - y_val * np.sin(theta)) / np.cos(theta) if np.abs(np.cos(theta)) > 1e-6 else None
-            if x_val is not None and -W / 2 <= x_val <= W / 2:
-                pts.append((x_val, y_val))
-        # Intersection with top boundary (y' = H)
-        y_val = H
-        if np.abs(np.sin(theta)) > 1e-6:
-            x_val = (r - y_val * np.sin(theta)) / np.cos(theta) if np.abs(np.cos(theta)) > 1e-6 else None
-            if x_val is not None and -W / 2 <= x_val <= W / 2:
-                pts.append((x_val, y_val))
-
-        # Remove duplicates (if any)
-        pts = list(set(pts))
-        if len(pts) >= 2:
-            # Pick two points (if more than two, you might refine this selection)
-            pt1, pt2 = pts[0], pts[1]
-            # Transform back to the original image coordinates:
-            # Original: x = x' + W/2, y = H - y'
-            pt1_orig = (pt1[0] + W / 2, H - pt1[1])
-            pt2_orig = (pt2[0] + W / 2, H - pt2[1])
-            # Format as (y1, x1, y2, x2)
-            lines.append((pt1_orig[1], pt1_orig[0], pt2_orig[1], pt2_orig[0]))
-    return lines
+# def reverse_mapping_ebr(hough_points, numAngle, numRho, size):
+#     H, W = size
+#     max_r = np.sqrt((W / 2) ** 2 + H ** 2)
+#     itheta = np.pi / numAngle
+#     irho = max_r / (numRho - 1)
+#
+#     lines = []
+#     for hp in hough_points:
+#         # Use hp[0] for theta and hp[1] for r, as regionprops returns (row, col).
+#         theta = hp[0] * itheta
+#         r = hp[1] * irho
+#
+#         pts = []
+#         # Intersection with left boundary (x' = -W/2)
+#         x_val = -W / 2
+#         if np.abs(np.cos(theta)) > 1e-6:
+#             y_val = (r - x_val * np.cos(theta)) / np.sin(theta) if np.abs(np.sin(theta)) > 1e-6 else None
+#             if y_val is not None and 0 <= y_val <= H:
+#                 pts.append((x_val, y_val))
+#         # Intersection with right boundary (x' = W/2)
+#         x_val = W / 2
+#         if np.abs(np.cos(theta)) > 1e-6:
+#             y_val = (r - x_val * np.cos(theta)) / np.sin(theta) if np.abs(np.sin(theta)) > 1e-6 else None
+#             if y_val is not None and 0 <= y_val <= H:
+#                 pts.append((x_val, y_val))
+#         # Intersection with bottom boundary (y' = 0)
+#         y_val = 0
+#         if np.abs(np.sin(theta)) > 1e-6:
+#             x_val = (r - y_val * np.sin(theta)) / np.cos(theta) if np.abs(np.cos(theta)) > 1e-6 else None
+#             if x_val is not None and -W / 2 <= x_val <= W / 2:
+#                 pts.append((x_val, y_val))
+#         # Intersection with top boundary (y' = H)
+#         y_val = H
+#         if np.abs(np.sin(theta)) > 1e-6:
+#             x_val = (r - y_val * np.sin(theta)) / np.cos(theta) if np.abs(np.cos(theta)) > 1e-6 else None
+#             if x_val is not None and -W / 2 <= x_val <= W / 2:
+#                 pts.append((x_val, y_val))
+#
+#         pts = list(set(pts))
+#         if len(pts) >= 2:
+#             pt1, pt2 = pts[0], pts[1]
+#             pt1_orig = (pt1[0] + W / 2, H - pt1[1])
+#             pt2_orig = (pt2[0] + W / 2, H - pt2[1])
+#             lines.append((pt1_orig[1], pt1_orig[0], pt2_orig[1], pt2_orig[0]))
+#     return lines
 
 
 def visulize_mapping(b_points, size, filename):
-    print(f"b_points :{b_points}")
-    print(f"size :{size}")
-    print(f"filename :{filename}")
+    if len(b_points) <= 0:
+        return None
+    # print(f"b_points :{b_points}")
+    # print(f"size :{size}")
+    # print(f"filename :{filename}")
     img = cv2.imread(os.path.join('./data/training/ebr_test', filename)) #change the path when using other dataset.
     img = cv2.resize(img, size)
     for (y1, x1, y2, x2) in b_points:

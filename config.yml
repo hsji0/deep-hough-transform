@@ -1,18 +1,18 @@
 DATA:
-    DIR: "data/training/"
-    VAL_DIR: "data/training/"
-    TEST_DIR: "data/DHT"
-    LABEL_FILE: "data/training/nkl_train.txt"
-    VAL_LABEL_FILE: "data/training/nkl_val.txt"
-    TEST_LABEL_FILE: "data/training/DHT.txt"
+    DIR: "data/training/ebr"
+    VAL_DIR: "data/training/ebr"
+    TEST_DIR: "data/training/ebr_test"
+    LABEL_FILE: "data/training/ebr_train.txt"
+    VAL_LABEL_FILE: "data/training/ebr_val.txt"
+    TEST_LABEL_FILE: "data/training/ebr_test.txt"
     # DIR: "data/training/"
     # VAL_DIR: "data/training/"
     # TEST_DIR: "data/training"
     # LABEL_FILE: "data/training/train_1716_100_100.txt"
     # VAL_LABEL_FILE: "data/training/test_1716_100_100.txt"
     # TEST_LABEL_FILE: "data/training/test_1716_100_100.txt"
-    BATCH_SIZE: 8
-    WORKERS: 4
+    BATCH_SIZE: 4
+    WORKERS: 1
 
 OPTIMIZER:
     LR: 2e-4
@@ -21,23 +21,25 @@ OPTIMIZER:
     WEIGHT_DECAY: 0
     STEPS: []
 
+
 MODEL:
-    NUMANGLE: 100
-    NUMRHO: 100
+    NUMANGLE: 320
+    NUMRHO: 320
     FIX: True
     THRESHOLD: 0.01
-    EDGE_ALIGN: True
+    EDGE_ALIGN: False #True
     BACKBONE: resnet50
     # only support : resnet18, resnet50, resnet101, mobilenetv2, resnext50, res2net50, vgg16
 
 TRAIN:
-    EPOCHS: 30
+    EPOCHS: 500
     PRINT_FREQ: 100
-    TEST: True
+    TEST: False
     SEED: 1997
     GPU_ID: 0
     DATA_PARALLEL: False
     RESUME:
+    EARLY_STOP_PATIENCE : 15
 
 MISC:
     TMP: "./results/vis_line"

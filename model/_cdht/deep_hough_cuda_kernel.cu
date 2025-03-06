@@ -3,15 +3,15 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <vector>
-#include <algorithm> 
-#include <math.h> 
+#include <algorithm>
+#include <math.h>
 #include <stdio.h>
 #include <iostream>
 
 
 // -------
-// KERNELS 
-// ------- 
+// KERNELS
+// -------
 __global__ void helloCUDA(const float *f)
 {
     for(int i = 0; i < 10; ++i)
@@ -30,18 +30,18 @@ void line_accum_forward_kernel(
     const float*  tabSin,
     float* output,
     const int imWidth,
-    const int imHeight, 
-    const int threadW, 
+    const int imHeight,
+    const int threadW,
     const int threadH,
     const int threadK,
-    const int channelSize, 
+    const int channelSize,
     const int batchSize,
     const int numangle,
     const int numrho)
 {
     int batch = blockIdx.y;
     int channel = blockIdx.x;
-    int x = threadIdx.x*threadW; 
+    int x = threadIdx.x*threadW;
     int y = threadIdx.y*threadH;
     int k = threadIdx.z*threadK;
 
@@ -49,9 +49,9 @@ void line_accum_forward_kernel(
                       channel*imWidth*imHeight+
                       y*imWidth+
                       x;
-    
+
     int angleStartIdx = k;
-    
+
     if (x < imWidth && y < imHeight && channel < channelSize && batch < batchSize && k < numangle)
     {
         int imgIndex = imgStartIdx;
@@ -79,7 +79,7 @@ void line_accum_forward_kernel(
                                 outIndex = batch*channelSize*numangle*numrho + numangle*numrho*channel + angleIndex*numrho + r;
                                 float val = feat[imgIndex];
                                 atomicAdd(&(output[outIndex]), val);
-                                
+
                             }
                             else break;
                         }
@@ -101,18 +101,18 @@ void line_accum_backward_kernel(
     const float* tabCos,
     const float* tabSin,
     const int imWidth,
-    const int imHeight, 
-    const int threadW, 
+    const int imHeight,
+    const int threadW,
     const int threadH,
     const int threadK,
-    const int channelSize, 
+    const int channelSize,
     const int batchSize,
     const int numangle,
     const int numrho)
 {
     int batch = blockIdx.y;
     int channel = blockIdx.x;
-    int x = threadIdx.x*threadW; 
+    int x = threadIdx.x*threadW;
     int y = threadIdx.y*threadH;
     int k = threadIdx.z*threadK;
 
@@ -120,7 +120,7 @@ void line_accum_backward_kernel(
                       channel*imWidth*imHeight+
                       y*imWidth+
                       x;
-    
+
     int angleStartIdx = k;
     // int maxindex = batchSize * channelSize * imHeight * imWidth;
     if (x < imWidth && y < imHeight && channel < channelSize && batch < batchSize && k < numangle)
@@ -174,12 +174,12 @@ void line_accum_backward_kernel(
 
 // ---------
 // Wrappers
-// --------- 
+// ---------
 
 std::vector<torch::Tensor> line_accum_cuda_forward(
     const torch::Tensor feat,
     const float* tabCos,
-    const float* tabSin, 
+    const float* tabSin,
     torch::Tensor output,
     const int numangle,
     const int numrho){
@@ -188,7 +188,7 @@ std::vector<torch::Tensor> line_accum_cuda_forward(
     // -tabSin: [numangle]
     const int batch_size = feat.size(0);
     const int channels_size = feat.size(1);
-    const int imH = feat.size(2); 
+    const int imH = feat.size(2);
     const int imW = feat.size(3);
 
     int blockSizeX = std::min(8, imW);
@@ -247,7 +247,7 @@ std::vector<torch::Tensor> line_accum_cuda_backward(
 {
     const int batch_size = feat.size(0);
     const int channels_size = feat.size(1);
-    const int imH = feat.size(2); 
+    const int imH = feat.size(2);
     const int imW = feat.size(3);
 
     int blockSizeX = std::min(8, imW);
@@ -270,11 +270,11 @@ std::vector<torch::Tensor> line_accum_cuda_backward(
     cudaMemcpy(d_tabCos, tabCos, sizeof(float)*numangle, cudaMemcpyHostToDevice);
     cudaMemcpy(d_tabSin, tabSin, sizeof(float)*numangle, cudaMemcpyHostToDevice);
     // std::cout << imW << " " << imH << " " << channels_size << " " << batch_size << " " << numangle << " " << numrho << std::endl;
-    
-    
+
+
     // printf("p = %p\n", grad_outputs.data<float>());
     // printf("p = %p\n", grad_in.data<float>());
-    
+
     line_accum_backward_kernel<<<blocks, threads>>>(
         grad_in.data<float>(),
         grad_outputs.data<float>(),

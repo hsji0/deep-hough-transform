@@ -1,14 +1,19 @@
 
-import os
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from PIL import Image
-import cv2
+from analyze_utils import *
+from analyze_utils import *
 
-global H_RATIO
-global W_RATIO
+"""
+Deep hough transform 조희연님 제안 방식 테스트
+ - descriptor vector 를 cosine similarity 계산하여 유사도 측정
+ - network 에서 concat 결과 기반 (return concat : True) 
+ - reference line 의 feature vector 와 가장 유사도 큰 하나만 추출한 결과를 시각화하여 저장
+
+"""
 # --- Directories and Reference ---
 IMAGE_DIRPATH = r"C:\Users\hsji\Downloads\ebr_test_\image"
 INTERMEDIATE_DIRPATH = r"C:\Users\hsji\Downloads\ebr_test_\intermediate"
@@ -21,15 +26,17 @@ REFERENCE_FILENAME = os.path.splitext(os.path.basename(REFERENCE_IMG_FULLPATH))[
 OUTPUT_DIRPATH = r"C:\Users\hsji\Downloads\ebr_test_\Output"
 os.makedirs(OUTPUT_DIRPATH, exist_ok=True)
 
+NUM_RHO = 320
+NUM_ANGLE = 320
+IMAGE_WIDTH = 2400
+IMAGE_HEIGHT = 640
+MODEL_WIDTH = 640
+MODEL_HEIGHT = 640
 
 def find_hough_lines(file_fullpath, method="max"):
     """
-    Given an intermediate file path, derive the corresponding image path.
-    Here we assume that the image file is named as:
-       <base>_hough.jpg
-    where <base> is obtained from the intermediate file's base name.
+    hough jpg 이미지에서 max 값 (가장 밝은) 위치의 x,y 좌표 추출
     """
-    print("[find_hough_lines]")
     # Get the base name (without extension) from the intermediate file.
     filename = os.path.splitext(os.path.basename(file_fullpath))[0]
     print("Intermediate base filename:", filename)
@@ -59,120 +66,86 @@ def find_hough_lines(file_fullpath, method="max"):
             y_ = top_index // img_width
             result.append((x_, y_))
         return result
+def find_hough_lines_reference(file_fullpath, method="max"):
+    """
+    hough jpg 이미지에서 max 값 (가장 밝은) 위치의 x,y 좌표 추출
+    """
+    # Get the base name (without extension) from the intermediate file.
+    filename = os.path.splitext(os.path.basename(file_fullpath))[0]
+    print("Intermediate base filename:", filename)
+    # Construct the image file name by appending "_hough.jpg"
+    img_fullpath = os.path.join(IMAGE_DIRPATH, f"{filename}_hough.jpg")
+    print("Image path:", img_fullpath)
 
+    # Open image using PIL and convert to numpy array.
+    img_ = Image.open(img_fullpath)
+    img_ = np.array(img_)
 
-
-def get_boundary_point(y, x, angle, H, W):
-    '''
-    Given point y,x with angle, return a two point in image boundary with shape [H, W]
-    return point:[x, y]
-    '''
-    point1 = None
-    point2 = None
-
-    if angle == -np.pi / 2:
-        point1 = (x, 0)
-        point2 = (x, H - 1)
-    elif angle == 0.0:
-        point1 = (0, y)
-        point2 = (W - 1, y)
+    # Get dimensions.
+    if len(img_.shape) == 2:
+        img_height, img_width = img_.shape
     else:
-        k = np.tan(angle)
-        if y - k * x >= 0 and y - k * x < H:  # left
-            if point1 == None:
-                point1 = (0, int(y - k * x))
-            elif point2 == None:
-                point2 = (0, int(y - k * x))
-                if point2 == point1: point2 = None
-        # print(point1, point2)
-        if k * (W - 1) + y - k * x >= 0 and k * (W - 1) + y - k * x < H:  # right
-            if point1 == None:
-                point1 = (W - 1, int(k * (W - 1) + y - k * x))
-            elif point2 == None:
-                point2 = (W - 1, int(k * (W - 1) + y - k * x))
-                if point2 == point1: point2 = None
-        # print(point1, point2)
-        if x - y / k >= 0 and x - y / k < W:  # top
-            if point1 == None:
-                point1 = (int(x - y / k), 0)
-            elif point2 == None:
-                point2 = (int(x - y / k), 0)
-                if point2 == point1: point2 = None
-        # print(point1, point2)
-        if x - y / k + (H - 1) / k >= 0 and x - y / k + (H - 1) / k < W:  # bottom
-            if point1 == None:
-                point1 = (int(x - y / k + (H - 1) / k), H - 1)
-            elif point2 == None:
-                point2 = (int(x - y / k + (H - 1) / k), H - 1)
-                if point2 == point1: point2 = None
-        # print(int(x-y/k+(H-1)/k), H-1)
-        if point2 == None: point2 = point1
-    return point1, point2
+        img_height, img_width = img_.shape[:2]
 
-# --- Dummy Reverse Mapping Function ---
-def reverse_mapping(point_list, numAngle, numRho, size=(32, 32)):
-    print(f"- point_list :{point_list}")
-    H, W = size
-    irho = int(np.sqrt(H*H + W*W) + 1) / ((numRho - 1))
-    itheta = np.pi / numAngle
-    b_points = []
+    flattened_sorted_ = img_.flatten()
 
-    for (ri, thetai) in point_list:
-        theta = thetai * itheta
-        r = ri - numRho // 2
-        cosi = np.cos(theta) / irho
-        sini = np.sin(theta) / irho
-        if sini == 0:
-            x = np.round(r / cosi + W / 2)
-            b_points.append((0, int(x), H-1, int(x)))
-        else:
-            angle = np.arctan(- cosi / sini)
-            y = np.round(r / sini + W * cosi / sini / 2 + H / 2)
-            p1, p2 = get_boundary_point(int(y), 0, angle, H, W)
-            if p1 is not None and p2 is not None:
-                b_points.append((p1[1], p1[0], p2[1], p2[0]))
-    return b_points
+    if method == "max":  # find hough line in hough space (represent as point (r, theta))
+        sorted_indices = np.argsort(flattened_sorted_)
+        top_index = sorted_indices[-1]
+        result = []
+        x_ = top_index % img_width
+        y_ = top_index // img_width
+        result.append((x_, y_))
+        return result
 
-def get_feat_ratio(layer):
-    # Load the original reference image.
-    ref_img = Image.open(REFERENCE_HOUGH_IMG_FULLPATH)
-    ref_img = np.array(ref_img)
-    size = ref_img.shape[-2:]
-
-    intermediate_filename = os.path.splitext(os.path.basename(REFERENCE_HOUGH_IMG_FULLPATH))[0]
-    intermediate_npz = os.path.join(INTERMEDIATE_DIRPATH, rf"{intermediate_filename[:-6]}.npz")
-    data = np.load(intermediate_npz, allow_pickle=True)
-    tensor = data[layer]  # e.g., shape: (1, channels, height, width)
-
-    h_ratio =  size[0] / tensor.shape[-2]
-    w_ratio = size[1] / tensor.shape[-1]
-    return (w_ratio, h_ratio)
-
-# --- Modified Feature Extraction ---
-def  extract_intermediate_feature(intermediate_fullpath, feat_xy_list, layer, size):
+def extract_intermediate_feature(intermediate_fullpath, feat_xy_list, layer, size):
     """
-    Loads the intermediate feature file (assumed saved as an npz file) from the given path.
-    It then extracts features from the specified layer (e.g. "p1").
-    Returns a list of dictionaries, each with:
-         {"coords": (x, y), "feature": feature_vector}
+    When using intermediate npz files (currently not used).
+
+    For each (x, y) coordinate in feat_xy_list, extract and concatenate
+    features from each intermediate level ('p1', 'p2', 'p3', 'p4').
     """
-    # Use the given path directly.
+    # Build the npz filename from the provided fullpath.
     filename = os.path.splitext(os.path.basename(intermediate_fullpath))[0]
     npz_filename = f"{filename}.npz"
     full_path = os.path.join(INTERMEDIATE_DIRPATH, npz_filename)
-    data = np.load(full_path, allow_pickle=True)
-    tensor = data[layer]  # e.g., shape: (1, channels, height, width)
 
+    data = np.load(full_path, allow_pickle=True)
     results = []
-    for (x_, y_) in feat_xy_list:
-        try:
-            x_ = int(np.round(x_ / W_RATIO))
-            feat = tensor[0, :, y_, x_]
-            results.append({"coords": (x_, y_), "feature": feat})
-        except IndexError:
-            results.append({"coords": (x_, y_), "feature": None})
+
+    for (x, y) in feat_xy_list:
+        feature_list = []
+        for pn in ['p1', 'p2', 'p3', 'p4']:
+            tensor_pn = data[pn]
+            # tensor_pn shape assumed to be (batch, channels, height, width)
+            # Since the model does not resize angle, h_ratio is always 1.
+            h, w = tensor_pn.shape[-2:]
+            # Calculate scaling ratios (adjust according to your model's resizing behavior)
+            h_ratio = h / NUM_ANGLE
+            w_ratio = w / NUM_ANGLE
+
+            try:
+                x_scaled = int(np.round(x * w_ratio))
+                y_scaled = int(np.round(y * h_ratio))
+                feat = tensor_pn[0, :, y_scaled, x_scaled]
+                feature_list.append(feat)
+            except IndexError:
+                # In case the scaled coordinate is out of bounds.
+                feature_list.append(None)
+
+        # If any feature is None, we assign None as the result for this coordinate.
+        if any(f is None for f in feature_list):
+            concatenated_feature = None
+        else:
+            # Concatenate features along the channel dimension.
+            concatenated_feature = np.concatenate(feature_list, axis=0)
+
+        results.append({"coords": (x, y), "feature": concatenated_feature})
+
     print(f"Extracted {len(results)} feature entries from {os.path.basename(full_path)}")
     return results
+
+
 def extract_concat_feature(concat_fullpath, feat_xy_list, layer, size):
     """
     Loads the intermediate feature file (assumed saved as an npz file) from the given path.
@@ -214,11 +187,12 @@ def compute_match_dict_reference(reference_file, target_files, method_="max", la
        { target_filename: [ {"coords": (x,y), "similarity": sim_value}, ... ] }
     """
     # Process reference image.
-    ref_feat_xy_list = find_hough_lines(reference_file, method=method_)
-    ref_feat_xy_list.pop(-1)
-    ref_feat_xy_list.pop(-1)
-    # ref_entries = extract_intermediate_feature(reference_file, ref_feat_xy_list, layer, size)
-    ref_entries = extract_concat_feature(reference_file, ref_feat_xy_list, layer, size)
+    ref_feat_xy_list = find_hough_lines_reference(reference_file, method=method_)
+
+    if layer == "intermediate":
+        ref_entries = extract_intermediate_feature(reference_file, ref_feat_xy_list, layer, size)
+    elif layer == "concat":
+        ref_entries = extract_concat_feature(reference_file, ref_feat_xy_list, layer, size)
     rep_ref = ref_entries[0]["feature"] if ref_entries and ref_entries[0]["feature"] is not None else None
     ref_key = os.path.splitext(os.path.basename(reference_file))[0]
 
@@ -227,8 +201,8 @@ def compute_match_dict_reference(reference_file, target_files, method_="max", la
     # Process each target image.
     for file_path in target_files:
         feat_xy_list = find_hough_lines(file_path, method=method_)
-        # target_entries = extract_intermediate_feature(file_path, feat_xy_list, layer, size)
-        target_entries = extract_concat_feature(file_path, feat_xy_list, layer, size)
+        target_entries = extract_intermediate_feature(file_path, feat_xy_list, layer, size)
+        # target_entries = extract_concat_feature(file_path, feat_xy_list, layer, size)
         key = os.path.splitext(os.path.basename(file_path))[0]
         matches = []
         if rep_ref is None:
@@ -252,13 +226,6 @@ def visualize_matches(reference_file, match_dict, numAngle=320, numRho=320, orig
     from the reference image. Use reverse_mapping to convert its hough-space coordinate to line endpoints,
     then overlay the line on a copy of the reference image and save the result.
     """
-    # Load the original reference image.
-    ref_img = Image.open(reference_file)
-    ref_img = np.array(ref_img)
-    if len(ref_img.shape) == 2:
-        ref_img_vis = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-    else:
-        ref_img_vis = ref_img.copy()
 
     # Get the reference key and the target match dictionary.
     ref_key = list(match_dict.keys())[0]
@@ -278,15 +245,14 @@ def visualize_matches(reference_file, match_dict, numAngle=320, numRho=320, orig
             continue
 
         # Reverse-map the hough coordinate for this best match.
-        # reverse_mapping expects a list, so we pass [best_match["coords"]].
         b_points = reverse_mapping([best_match["coords"]], numAngle, numRho, size=orig_size)
         if not b_points or b_points[0] is None:
             continue
 
         # Optionally, apply scaling if needed.
         # (Here we assume a scale from orig_size (640x640) to the desired output size, e.g., 2400x640.)
-        scale_w = 2400 / 640
-        scale_h = 640 / 640
+        scale_w = IMAGE_WIDTH / MODEL_WIDTH
+        scale_h = IMAGE_HEIGHT / MODEL_HEIGHT
         for i in range(len(b_points)):
             y1 = int(np.round(b_points[i][0] * scale_h))
             x1 = int(np.round(b_points[i][1] * scale_w))
@@ -296,57 +262,38 @@ def visualize_matches(reference_file, match_dict, numAngle=320, numRho=320, orig
                 angle = -np.pi / 2
             else:
                 angle = np.arctan((y1 - y2) / (x1 - x2))
-            (x1, y1), (x2, y2) = get_boundary_point(y1, x1, angle, 640, 2400)
+            (x1, y1), (x2, y2) = get_boundary_point(y1, x1, angle, IMAGE_HEIGHT, IMAGE_WIDTH)
             b_points[i] = (y1, x1, y2, x2)
-        img_vis = visulize_mapping(b_points, (2400, 640), target)
+        img_vis = visulize_mapping(b_points, (IMAGE_WIDTH, IMAGE_HEIGHT), target)
         cv2.imwrite(os.path.join(OUTPUT_DIRPATH, rf"match_{layer}_ref_{target}.jpg"), img_vis)
 
-def visulize_mapping(b_points, size, filename):
-    """
-    Reads the image from IMAGE_DIRPATH using the given filename,
-    resizes it to the given size, and then draws lines on it based on b_points.
-    """
-
-    # Use IMAGE_DIRPATH to locate the image.
-    img_path = os.path.join(IMAGE_DIRPATH, rf"{filename}.jpg")
-    img = cv2.imread(img_path)
-    if img is None:
-        print(f"Could not load image from {img_path}")
-        return None
-    img = cv2.resize(img, size)
-    # Draw each line from b_points.
-    for (y1, x1, y2, x2) in b_points:
-        thickness = int(0.01 * max(size[0], size[1]))
-        img = cv2.line(img, (x1, y1), (x2, y2), (0, 0, 255), thickness=thickness)
-    return img
-
-def get_size():
-    ref_img = Image.open(REFERENCE_HOUGH_IMG_FULLPATH)
-    ref_img =  np.array(ref_img)
-    print(ref_img.shape)
-    return ref_img.shape[:2]
 
 
 # --- Main processing ---
 if __name__ == "__main__":
-    # Gather target intermediate files ending with '.npz'
-    # target_files = [os.path.join(INTERMEDIATE_DIRPATH, filename)
-    #                 for filename in os.listdir(INTERMEDIATE_DIRPATH)
-    #                 if filename.endswith("npz")]
-    target_files = [os.path.join(CONCAT_DIRPATH, filename)
-                    for filename in os.listdir(CONCAT_DIRPATH)
-                    if filename.endswith("npy")]
+    # layer = "concat"
+    layer = "intermediate"
+
+    if layer == "concat":
+        target_files = [os.path.join(CONCAT_DIRPATH, filename)
+                        for filename in os.listdir(CONCAT_DIRPATH)
+                        if filename.endswith("npy")]
+    elif layer == "intermediate":
+        target_files = [os.path.join(INTERMEDIATE_DIRPATH, filename)
+                        for filename in os.listdir(INTERMEDIATE_DIRPATH)
+                        if filename.endswith("npz")]
+    else:
+        assert f"layer name is not valid :{layer}"
+
     reference_file = target_files.pop(0)
     print(f"=> reference :{reference_file}, target_files :{target_files}")
 
     size = get_size()
-    layer = "concat"
     print(f"size :{size}, layer :{layer}")
-    # (W_RATIO, H_RATIO) = get_feat_ratio(layer)
-    # print(f"get_feat_ratio :{W_RATIO, H_RATIO}")
+
     # Compute the match dictionary: reference vs. targets.
     match_dict = compute_match_dict_reference(REFERENCE_IMG_FULLPATH, target_files, method_="max", layer=layer)
-    print("Match Dictionary:")
+    print("Match Dictionary")
     print(match_dict)
 
     # Optionally, save the match dictionary to an Excel file.
@@ -364,4 +311,4 @@ if __name__ == "__main__":
 
     # Visualize the matched lines on the reference image.
     # Adjust numAngle, numRho, and orig_size as needed.
-    visualize_matches(REFERENCE_IMG_FULLPATH, match_dict, numAngle=320, numRho=320, orig_size=(640, 640), layer=layer)
+    visualize_matches(REFERENCE_IMG_FULLPATH, match_dict, numAngle=NUM_ANGLE, numRho=NUM_RHO, orig_size=(MODEL_WIDTH, MODEL_HEIGHT), layer=layer)

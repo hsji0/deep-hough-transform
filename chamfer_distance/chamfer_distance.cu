@@ -136,74 +136,78 @@ void ChamferDistanceKernel(
 	}
 }
 
-void ChamferDistanceKernelLauncher(
-    const int b, const int n,
-    const float* xyz,
-    const int m,
-    const float* xyz2,
-    float* result,
-    int* result_i,
-    float* result2,
-    int* result2_i)
-{
-	ChamferDistanceKernel<<<dim3(32,16,1),512>>>(b, n, xyz, m, xyz2, result, result_i);
-	ChamferDistanceKernel<<<dim3(32,16,1),512>>>(b, m, xyz2, n, xyz, result2, result2_i);
-
-	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess)
-	    printf("error in chamfer distance updateOutput: %s\n", cudaGetErrorString(err));
-}
 
 
-__global__ 
-void ChamferDistanceGradKernel(
-	int b, int n,
-	const float* xyz1,
-	int m,
-	const float* xyz2,
-	const float* grad_dist1,
-	const int* idx1,
-	float* grad_xyz1,
-	float* grad_xyz2)
-{
-	for (int i = blockIdx.x; i<b; i += gridDim.x) {
-		for (int j = threadIdx.x + blockIdx.y * blockDim.x; j < n; j += blockDim.x*gridDim.y) {
-			float x1=xyz1[(i*n+j)*3+0];
-			float y1=xyz1[(i*n+j)*3+1];
-			float z1=xyz1[(i*n+j)*3+2];
-			int j2=idx1[i*n+j];
-			float x2=xyz2[(i*m+j2)*3+0];
-			float y2=xyz2[(i*m+j2)*3+1];
-			float z2=xyz2[(i*m+j2)*3+2];
-			float g=grad_dist1[i*n+j]*2;
-			atomicAdd(&(grad_xyz1[(i*n+j)*3+0]),g*(x1-x2));
-			atomicAdd(&(grad_xyz1[(i*n+j)*3+1]),g*(y1-y2));
-			atomicAdd(&(grad_xyz1[(i*n+j)*3+2]),g*(z1-z2));
-			atomicAdd(&(grad_xyz2[(i*m+j2)*3+0]),-(g*(x1-x2)));
-			atomicAdd(&(grad_xyz2[(i*m+j2)*3+1]),-(g*(y1-y2)));
-			atomicAdd(&(grad_xyz2[(i*m+j2)*3+2]),-(g*(z1-z2)));
-		}
-	}
-}
+    __global__
+    void ChamferDistanceGradKernel(
+        int b, int n,
+        const float* xyz1,
+        int m,
+        const float* xyz2,
+        const float* grad_dist1,
+        const int* idx1,
+        float* grad_xyz1,
+        float* grad_xyz2)
+    {
+        for (int i = blockIdx.x; i<b; i += gridDim.x) {
+            for (int j = threadIdx.x + blockIdx.y * blockDim.x; j < n; j += blockDim.x*gridDim.y) {
+                float x1=xyz1[(i*n+j)*3+0];
+                float y1=xyz1[(i*n+j)*3+1];
+                float z1=xyz1[(i*n+j)*3+2];
+                int j2=idx1[i*n+j];
+                float x2=xyz2[(i*m+j2)*3+0];
+                float y2=xyz2[(i*m+j2)*3+1];
+                float z2=xyz2[(i*m+j2)*3+2];
+                float g=grad_dist1[i*n+j]*2;
+                atomicAdd(&(grad_xyz1[(i*n+j)*3+0]),g*(x1-x2));
+                atomicAdd(&(grad_xyz1[(i*n+j)*3+1]),g*(y1-y2));
+                atomicAdd(&(grad_xyz1[(i*n+j)*3+2]),g*(z1-z2));
+                atomicAdd(&(grad_xyz2[(i*m+j2)*3+0]),-(g*(x1-x2)));
+                atomicAdd(&(grad_xyz2[(i*m+j2)*3+1]),-(g*(y1-y2)));
+                atomicAdd(&(grad_xyz2[(i*m+j2)*3+2]),-(g*(z1-z2)));
+            }
+        }
+    }
 
-void ChamferDistanceGradKernelLauncher(
-    const int b, const int n,
-    const float* xyz1,
-    const int m,
-    const float* xyz2,
-    const float* grad_dist1,
-    const int* idx1,
-    const float* grad_dist2,
-    const int* idx2,
-    float* grad_xyz1,
-    float* grad_xyz2)
-{
-	cudaMemset(grad_xyz1, 0, b*n*3*4);
-	cudaMemset(grad_xyz2, 0, b*m*3*4);
-	ChamferDistanceGradKernel<<<dim3(1,16,1), 256>>>(b, n, xyz1, m, xyz2, grad_dist1, idx1, grad_xyz1, grad_xyz2);
-	ChamferDistanceGradKernel<<<dim3(1,16,1), 256>>>(b, m, xyz2, n, xyz1, grad_dist2, idx2, grad_xyz2, grad_xyz1);
 
-	cudaError_t err = cudaGetLastError();
-  	if (err != cudaSuccess)
-	    printf("error in chamfer distance get grad: %s\n", cudaGetErrorString(err));
+extern "C" {
+    void ChamferDistanceKernelLauncher(
+        const int b, const int n,
+        const float* xyz,
+        const int m,
+        const float* xyz2,
+        float* result,
+        int* result_i,
+        float* result2,
+        int* result2_i)
+    {
+        ChamferDistanceKernel<<<dim3(32,16,1),512>>>(b, n, xyz, m, xyz2, result, result_i);
+        ChamferDistanceKernel<<<dim3(32,16,1),512>>>(b, m, xyz2, n, xyz, result2, result2_i);
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess)
+            printf("error in chamfer distance updateOutput: %s\n", cudaGetErrorString(err));
+    }
+
+    void ChamferDistanceGradKernelLauncher(
+        const int b, const int n,
+        const float* xyz1,
+        const int m,
+        const float* xyz2,
+        const float* grad_dist1,
+        const int* idx1,
+        const float* grad_dist2,
+        const int* idx2,
+        float* grad_xyz1,
+        float* grad_xyz2)
+    {
+        cudaMemset(grad_xyz1, 0, b*n*3*4);
+        cudaMemset(grad_xyz2, 0, b*m*3*4);
+        ChamferDistanceGradKernel<<<dim3(1,16,1), 256>>>(b, n, xyz1, m, xyz2, grad_dist1, idx1, grad_xyz1, grad_xyz2);
+        ChamferDistanceGradKernel<<<dim3(1,16,1), 256>>>(b, m, xyz2, n, xyz1, grad_dist2, idx2, grad_xyz2, grad_xyz1);
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess)
+            printf("error in chamfer distance get grad: %s\n", cudaGetErrorString(err));
+    }
 }

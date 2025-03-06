@@ -7,7 +7,7 @@
 
 // CUDA forward declarations
 std::vector<torch::Tensor> line_accum_cuda_forward(
-    const torch::Tensor feat, 
+    const torch::Tensor feat,
     const float* tabCos,
     const float* tabSin,
     torch::Tensor output,
@@ -25,17 +25,17 @@ std::vector<torch::Tensor> line_accum_cuda_backward(
 
 // C++ interface
 
-#define CHECK_CUDA(x) AT_ASSERT(x.type().is_cuda()) //, #x " must be a CUDA tensor")
-#define CHECK_CONTIGUOUS(x) AT_ASSERT(x.is_contiguous()) //, #x " must be contiguous")
+#define CHECK_CUDA(x) AT_ASSERT(x.type().is_cuda())
+#define CHECK_CONTIGUOUS(x) AT_ASSERT(x.is_contiguous())
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 #define PI 3.14159265358979323846
 
 void initTab(float* tabSin, float* tabCos, const int numangle, const int numrho, const int H, const int W)
 {
-    float irho = int(std::sqrt(H*H + W*W) + 1) / float((numrho - 1));
+    float irho = int(std::sqrt(H * H + W * W) + 1) / float((numrho - 1));
     float itheta = PI / numangle;
     float angle = 0;
-    for(int i = 0; i < numangle; ++i)
+    for (int i = 0; i < numangle; ++i)
     {
         tabCos[i] = std::cos(angle) / irho;
         tabSin[i] = std::sin(angle) / irho;
@@ -51,16 +51,16 @@ std::vector<at::Tensor> line_accum_forward(
 
     CHECK_INPUT(feat);
     CHECK_INPUT(output);
-    float tabSin[numangle], tabCos[numangle];
+
+    // std::vector를 사용하여 동적 배열 할당
+    std::vector<float> tabSin(numangle);
+    std::vector<float> tabCos(numangle);
+
     const int H = feat.size(2);
     const int W = feat.size(3);
-    initTab(tabSin, tabCos, numangle, numrho, H, W);
-    const int batch_size = feat.size(0);
-    const int channels_size = feat.size(1);
-    
-    // torch::set_requires_grad(output, true);
-    auto out = line_accum_cuda_forward(feat, tabCos, tabSin, output, numangle, numrho);
-    // std::cout << out[0].sum() << std::endl;
+    initTab(tabSin.data(), tabCos.data(), numangle, numrho, H, W);
+
+    auto out = line_accum_cuda_forward(feat, tabCos.data(), tabSin.data(), output, numangle, numrho);
     CHECK_CONTIGUOUS(out[0]);
     return out;
 }
@@ -71,27 +71,24 @@ std::vector<torch::Tensor> line_accum_backward(
     torch::Tensor feat,
     const int numangle,
     const int numrho) {
-  
+
     CHECK_INPUT(grad_outputs);
     CHECK_INPUT(grad_inputs);
     CHECK_INPUT(feat);
 
-    float tabSin[numangle], tabCos[numangle];
+    std::vector<float> tabSin(numangle);
+    std::vector<float> tabCos(numangle);
+
     const int H = feat.size(2);
     const int W = feat.size(3);
-    initTab(tabSin, tabCos, numangle, numrho, H, W);
-
-    const int batch_size = feat.size(0);
-    const int channels_size = feat.size(1);
-    const int imH = feat.size(2);
-    const int imW = feat.size(3);
+    initTab(tabSin.data(), tabCos.data(), numangle, numrho, H, W);
 
     return line_accum_cuda_backward(
         grad_outputs,
         grad_inputs,
         feat,
-        tabCos,
-        tabSin,
+        tabCos.data(),
+        tabSin.data(),
         numangle,
         numrho);
 }

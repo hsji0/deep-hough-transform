@@ -23,10 +23,10 @@ parser.add_argument('--num_directions', type=int, default=12,
 parser.add_argument('--list', type=str, required=True, help='List file (for recording processed names, if needed).')
 parser.add_argument('--save-dir', type=str, required=True, help='Directory to save processed outputs.')
 parser.add_argument('--prefix', type=str, default="", help="Prefix in list file (if needed).")
-parser.add_argument('--fixsize', type=int, default=None,
+parser.add_argument('--fixsize', type=int, default=640,
                     help='Fixed size (square) for resizing images and annotations.')
-parser.add_argument('--numangle', type=int, default=80, required=True, help='Number of bins for angle in Hough space.')
-parser.add_argument('--numrho', type=int, default=80, required=True, help='Number of bins for rho in Hough space.')
+parser.add_argument('--numangle', type=int, default=320, required=True, help='Number of bins for angle in Hough space.')
+parser.add_argument('--numrho', type=int, default=320, required=True, help='Number of bins for rho in Hough space.')
 args = parser.parse_args()
 
 # Get absolute paths.
@@ -89,7 +89,8 @@ for idx, label_file in enumerate(labels_files):
             if len(data1) < 4:
                 continue
             # Convert the first four entries to integers.
-            coords = [int(float(x)) for x in data1[:4]]
+            coords_ = [int(float(x)) for x in data1[:4]]
+            coords = [coords_[1], coords_[0], coords_[3], coords_[2]]
             # Skip degenerate line segments (where both endpoints are identical).
             if coords[0] == coords[2] and coords[1] == coords[3]:
                 continue
@@ -110,6 +111,7 @@ for idx, label_file in enumerate(labels_files):
     print(f"** newW :{newW}, newH:{newH}")
     im = cv2.resize(im, (newW, newH))
     annotation.resize(size=[newH, newW])
+    print(f"new size :[{newH},{newW}]")
 
     # Create visualizations.
     vis, mask = vis_anno(im, annotation)
@@ -117,10 +119,9 @@ for idx, label_file in enumerate(labels_files):
     # Build the Hough space label.
     hough_space_label = np.zeros((args.numangle, args.numrho))
     for l in annotation.lines:
-        # theta, r = line2hough(l, numAngle=args.numangle, numRho=args.numrho, size=(newH, newW))
-        theta, r = line2hough_ebr(l, numAngle=args.numangle, numRho=args.numrho, size=(newH, newW))
+        theta, r = line2hough(l, numAngle=args.numangle, numRho=args.numrho, size=(newH, newW))
+        # theta, r = line2hough_ebr(l, numAngle=args.numangle, numRho=args.numrho, size=(newH, newW))
         hough_space_label[theta, r] += 1
-
     # Apply Gaussian blur and normalize the Hough space label.
     hough_space_label = cv2.GaussianBlur(hough_space_label, (5, 5), 0)
     if hough_space_label.max() > 0:

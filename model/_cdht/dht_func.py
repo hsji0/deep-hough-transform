@@ -4,8 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
+
 class C_dht_Function(torch.autograd.Function):
-    @staticmethod 
+    @staticmethod
     def forward(ctx, feat, numangle, numrho):
         N, C, _, _ = feat.size()
         out = torch.zeros(N, C, numangle, numrho).type_as(feat).cuda()
@@ -15,7 +16,7 @@ class C_dht_Function(torch.autograd.Function):
         ctx.numangle = numangle
         ctx.numrho = numrho
         return outputs
-        
+
     @staticmethod
     def backward(ctx, grad_output):
         feat = ctx.saved_tensors[0]
@@ -32,8 +33,6 @@ class C_dht(torch.nn.Module):
         super(C_dht, self).__init__()
         self.numAngle = numAngle
         self.numRho = numRho
-    
+
     def forward(self, feat):
         return C_dht_Function.apply(feat, self.numAngle, self.numRho)
-
-
